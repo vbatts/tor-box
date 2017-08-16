@@ -20,7 +20,8 @@ systemd-nspawn -bni $(pwd)/image.raw -M tor-box
 
 This boots the container up, but gives you a login prompt with no root passwd set.
 The container is on private network with a veth to the host.
-This expects systemd-networkd on the host to be configured and running.
+This expects `systemd-networkd.service` on the host to be configured and running.
+Also, this may conflict with the `firewalld.service`, so disable that or tamper at your own will.
 
 To get a shell inside this container, do:
 
@@ -52,7 +53,7 @@ Likewise you can enable it to start on-boot with:
 sudo sudo systemctl enable systemd-nspawn@tor-box.raw
 ```
 
-(this requires `systemd-machined.service` to be enabled on the host.
+(this requires `systemd-machined` so `systemctl enable --now machines.target` on the host.)
 
 
 ## Props and References
