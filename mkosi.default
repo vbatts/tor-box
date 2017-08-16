@@ -1,0 +1,12 @@
+[Distribution]
+Distribution=fedora
+Release=26
+
+[Output]
+Format=raw_btrfs
+#Bootable=yes
+Hostname=tor-box
+
+[Packages]
+Packages=tor iptables net-tools iproute vim-minimal curl
+#BuildPackages=make gcc libcurl-devel

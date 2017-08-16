@@ -1,0 +1,110 @@
+#!/bin/sh
+
+cd 
+
+mkdir -p $DESTDIR/etc/systemd/system
+cat > $DESTDIR/etc/systemd/system/tor.service <<EOF
+[Unit]
+Description=Anonymizing overlay network for TCP
+After=syslog.target network.target nss-lookup.target
+PartOf=tor-master.service
+ReloadPropagatedFrom=tor-master.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+ExecStartPre=/usr/bin/tor --runasdaemon 0 -f /etc/tor/torrc.ours --verify-config
+ExecStart=/usr/bin/tor --runasdaemon 0 -f /etc/tor/torrc.ours
+ExecReload=/bin/kill -HUP \${MAINPID}
+KillSignal=SIGINT
+TimeoutSec=30
+Restart=on-failure
+RestartSec=1
+WatchdogSec=1m
+LimitNOFILE=32768
+
+[Install]
+WantedBy = multi-user.target
+EOF
+
+mkdir -p $DESTDIR/etc/tor
+cat > $DESTDIR/etc/tor/torrc.ours <<EOF
+
+DataDirectory /var/lib/tor
+DataDirectoryGroupReadable 1
+User toranon
+Log notice syslog
+#Log debug stderr
+AutomapHostsOnResolve 1
+DNSPort 5353
+Log debug stderr
+TransPort 9040
+VirtualAddrNetworkIPv4 10.192.0.0/10
+
+EOF
+
+cat > $DESTDIR/etc/systemd/system/iptables-restore.service <<EOF
+[Unit]
+Description=apply iptables rules
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh /etc/rc.firewall
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > $DESTDIR/etc/rc.firewall <<EOF
+### set variables
+#destinations you don't want routed through Tor
+_non_tor="192.168.1.0/24 192.168.0.0/24"
+
+#the UID that Tor runs as (varies from system to system)
+_tor_uid="\$(id -u toranon)"
+
+#Tor's TransPort
+_trans_port="9040"
+_dns_port="5353"
+
+### flush iptables
+iptables -F
+iptables -t nat -F
+
+### set iptables *nat
+iptables -t nat -A OUTPUT -m owner --uid-owner \$_tor_uid -j RETURN
+iptables -t nat -A OUTPUT -p udp --dport 53 -j REDIRECT --to-ports \$_dns_port
+
+#allow clearnet access for hosts in \$_non_tor
+for _clearnet in \$_non_tor 127.0.0.0/9 127.128.0.0/10; do
+   iptables -t nat -A OUTPUT -d \$_clearnet -j RETURN
+done
+
+#redirect all other output to Tor's TransPort
+iptables -t nat -A OUTPUT -p tcp --syn -j REDIRECT --to-ports \$_trans_port
+
+### set iptables *filter
+iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+#allow clearnet access for hosts in \$_non_tor
+for _clearnet in \$_non_tor 127.0.0.0/8; do
+   iptables -A OUTPUT -d \$_clearnet -j ACCEPT
+done
+
+#allow only Tor output
+iptables -A OUTPUT -m owner --uid-owner \$_tor_uid -j ACCEPT
+iptables -A OUTPUT -j REJECT
+EOF
+
+
+mkdir -p $DESTDIR/etc/systemd/system/multi-user.target.wants
+ln -sf /etc/systemd/system/tor.service $DESTDIR/etc/systemd/system/multi-user.target.wants/tor.service
+ln -sf /usr/lib/systemd/system/systemd-networkd.service $DESTDIR/etc/systemd/system/multi-user.target.wants/systemd-networkd.service
+mkdir -p $DESTDIR/etc/systemd/system/sockets.target.wants
+ln -sf /usr/lib/systemd/system/systemd-networkd.socket $DESTDIR/etc/systemd/system/sockets.target.wants/systemd-networkd.socket
+ln -sf /etc/systemd/system/iptables-restore.service $DESTDIR/etc/systemd/system/multi-user.target.wants/iptables-restore.service
+
+# disable failing services
+ln -sf /dev/null $DESTDIR/etc/systemd/system/systemd-update-utmp.service
+ln -sf /dev/null $DESTDIR/etc/systemd/system/systemd-tmpfiles-setup.service
